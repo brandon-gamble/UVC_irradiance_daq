@@ -7,47 +7,9 @@ R5  - 4 sensors
 R6  - 6 sensors
 R7  - multiplexer (no smoothing)
 R8  - multiplexer with smoothing
-R9  - irrad as func of analog reading
+R9  - log / lin adjustment **** NEEDS IMPROVEMENT
+R10 - op amp output along with raw output
 */
-
-class sensor
-{
-    int id;
-
-    float m_lin;
-    float b_lin;
-
-    float m_log;
-    float b_log;
-
-    public:
-    sensor(int ID, float M_LIN, float B_LIN, float M_LOG, float B_LOG)
-    // m and b are from reference of irr on x axis, analog on y axis
-    {
-        id = ID;
-
-        m_lin = M_LIN;
-        b_lin = B_LIN;
-
-        m_log = M_LOG;
-        b_log = B_LOG;
-    } // end public
-
-
-    float irr_lin(float ao)
-    {
-        float irr = (ao - b_lin)/m_lin;
-        return irr;
-    }
-
-    float irr_log(float ao)
-    {
-        float expon = (ao - b_log)/m_log;
-        float irr = pow(2.71828, expon);
-        return irr;
-    }
-
-}; // end sensor class
 
 //Mux control pins
 const int s0 = 5;
@@ -57,94 +19,92 @@ const int s3 = 2;
 
 //Mux in "SIG" pin
 const int SIG_pin = 6;
+const int GAIN_pin = 3;
 
 // number of channels
 const int max_channel = 8;
+//const int max_channel = 1;
 
-sensor sens_arr[max_channel]{
-//sensor(int ID, float M_LIN, float B_LIN, float M_LOG, float B_LOG)
-    {0,  160.46, -130.77,  1,1},
-    {1,  66.228, -58.801,  1,1},
-    {2,  111.10, -73.126,  1,1},
-    {3,  105.10, -70.659,  1,1},
-    {4,  53.724, -30.333,  1,1},
-    {5,  68.834, -56.017,  1,1},
-    {6,  69.828, -55.340,  1,1},
-    {9,  179.27, -118.98,  1,1},
-};
+// for raw readings
+float total_raw[max_channel];
+float average_raw[max_channel];
+float sensorVolt_raw[max_channel];
 
-float total[max_channel];
-float average[max_channel];
-float irr[max_channel];
-// const int numReadings = 25;
-const int numReadings = 500;
+// for op amp readings
+float total_oa[max_channel];
+float average_oa[max_channel];
+float sensorVolt_oa[max_channel];
+
+const int numReadings = 50;
+//const int numReadings = 1;
 
 void setup(){
-    pinMode(s0, OUTPUT);
-    pinMode(s1, OUTPUT);
-    pinMode(s2, OUTPUT);
-    pinMode(s3, OUTPUT);
+  pinMode(s0, OUTPUT);
+  pinMode(s1, OUTPUT);
+  pinMode(s2, OUTPUT);
+  pinMode(s3, OUTPUT);
 
-    digitalWrite(s0, LOW);
-    digitalWrite(s1, LOW);
-    digitalWrite(s2, LOW);
-    digitalWrite(s3, LOW);
+  digitalWrite(s0, LOW);
+  digitalWrite(s1, LOW);
+  digitalWrite(s2, LOW);
+  digitalWrite(s3, LOW);
 
-    // sensor(int CHANNEL, float M_LIN, float B_LIN, float M_LOG, float M_LIN)
-    // (int , float , float , float , float )
-    // ( CHANNEL,  M_LIN,  B_LIN,  M_LOG,  M_LIN)
-    sensor s0(0, 1,1,1,1);
+  Serial.begin(9600);
 
-    Serial.begin(9600);
-
-    Serial.println("-------------------------------------------------------");
-    Serial.println("--------------------- BEGIN TEST ----------------------");
-    Serial.println("-------------------------------------------------------");
+  Serial.println("-------------------------------------------------------");
+  Serial.println("--------------------- BEGIN TEST ----------------------");
+  Serial.println("-------------------------------------------------------");
 }
 
 
 void loop(){
+    // total_1 = 0;
+    // total_2 = 0;
+    // total_3 = 0;
+    // total_4 = 0;
+    // total_5 = 0;
+    // total_6 = 0;
+    // total_7 = 0;
 
     // reset the totals
     for (int i = 0; i < max_channel; i++){
-        total[i] = 0;
+        total_raw[i] = 0;
+        total_oa[i] = 0;
     }
 
-    // for each reading, read every channel and add to respective total
+
     for (int j = 0; j < numReadings; j++){
         for(int i = 0; i < max_channel; i ++){
             // Serial.print("Value at channel ");
             // Serial.print(i);
             // Serial.print(" is : ");
             // Serial.println(readMux(i));
-            total[i] = total[i] + readMux(i);
+            
+            int *p;
+            p = readMux(i);
+            
+            total_raw[i] = total_raw[i] + *p;
+            total_oa[i] = total_oa[i] + *(p+1);
         }
         delay(1);
     }
 
 
-    // get average from each total
+
     for (int i = 0; i < max_channel; i++) {
-        average[i] = total[i] / numReadings;
-
-        irr[i] = sens_arr[i].irr_lin(average[i]);
-        // irr[i] = sens_arr[i].irr_log(average[i])
-
-        Serial.print(average[i]);
+        average_raw[i] = total_raw[i] / numReadings;
+        average_oa[i] = total_oa[i] / numReadings;
+        Serial.print(average_raw[i]);
         Serial.print(", ");
-
-        Serial.print(irr[i]);
-        Serial.print(" | ");
+        Serial.print(average_oa[i]);
+        Serial.print(", ");
     }
-
     Serial.println("");
-
 
 }
 
 
-
-int readMux(int channel){
+int * readMux(int channel){
     int controlPin[] = {s0, s1, s2, s3};
 
     int muxChannel[16][4]={
@@ -166,14 +126,22 @@ int readMux(int channel){
         {1,1,1,1}  //channel 15
     };
 
-    //loop through the 4 sig
+    // loop through the 4 signal pins 
+    // to set path to desired channel
     for(int i = 0; i < 4; i ++){
         digitalWrite(controlPin[i], muxChannel[channel][i]);
     }
 
-    //read the value at the SIG pin
-    int val = analogRead(SIG_pin);
+    // read values of desired channel
+    int raw = analogRead(SIG_pin);
+    int amp = analogRead(GAIN_pin);
 
-    //return the value
-    return val;
+    // make static integer array to store values
+    static int output[2];
+    
+    // put values in array
+    output[0] = raw;
+    output[1] = amp;
+    
+    return output;
 }
