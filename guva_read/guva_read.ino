@@ -9,7 +9,65 @@ R7  - multiplexer (no smoothing)
 R8  - multiplexer with smoothing
 R9  - log / lin adjustment **** NEEDS IMPROVEMENT
 R10 - op amp output along with raw output
+R11 - log / lin with op amp... autoselect??
+
+
+to add:
+- a cutoff variable as part of the sensor class (raw and amplified)
+  - because there is an offset voltage, the sensor output will be greater than zero
+    when the input to the sensor is 0 (complete darkness)
+  - the analog output due to the offset voltage is known from calibration, this is to be set as the cutoff
+  - if the sensor output is close to this cutoff, need to tell user that irrad is too low to register
+  - for example, sensor 5 flattens at 200 uW/cm2. any irradiance below this will
+    spit out ~4 (raw) or ~290 (G=47). if the irrad drops below 200 uW/cm2, the sensor will still 
+    spit out 4 and 290, which will incorrectly return 200 uW/cm2 to the user. need to set cutoff of
+    6 and 300 (a little higher than flatline to be safe) and when output is below this the user
+    is warned that irrad is too low to measure
+
+- integrator to get total dosage 
 */
+
+
+
+
+class sensor
+{
+    int id;
+
+    float m_r; // raw
+    float b_r;
+
+    float m_g0; //gain0 - may expand to have multiple op amp channels
+    float b_g0;
+
+    public:
+    sensor(int ID, float M_R, float B_R, float M_G0, float B_G0)
+    // m and b are from reference of irr (I) on x axis, analog (A) on y axis
+    // i.e. A = m*I + b
+    {
+        id = ID;
+
+        m_r = M_R;
+        b_r = B_R;
+
+        m_g0 = M_G0;
+        b_g0 = B_G0;
+    } // end public
+
+
+    float irr_raw(float ao)
+    {
+        float irr = (ao - b_r)/m_r;
+        return irr;
+    }
+
+    float irr_g0(float ao)
+    {
+        float irr = (ao - b_g0)/m_g0;
+        return irr;
+    }
+
+}; // end sensor class
 
 //Mux control pins
 const int s0 = 5;
@@ -23,85 +81,104 @@ const int GAIN_pin = 3;
 
 // number of channels
 const int max_channel = 8;
-//const int max_channel = 1;
 
 // for raw readings
 float total_raw[max_channel];
 float average_raw[max_channel];
-float sensorVolt_raw[max_channel];
 
 // for op amp readings
-float total_oa[max_channel];
-float average_oa[max_channel];
-float sensorVolt_oa[max_channel];
+float total_g0[max_channel];
+float average_g0[max_channel];
+
+float irr[max_channel];
 
 const int numReadings = 50;
-//const int numReadings = 1;
+
+sensor sens_arr[max_channel]{
+//sensor(int ID, float M_R, float B_R, float M_G0, float B_G0)
+    {0,  0.1206,  -9.4596,    5.5157, -326.19},
+    {1,  0.0902,  -8.2601,    4.2468, -282.23},
+    {2,  0.2096,   0.5314,   11.325,    27.652},
+    {3,  0.1952,  -7.2172,   10.004,  -306.58},
+    {4,  0.1035,   0.2135,    5.4794,   63.844},
+    {5,  0.1024, -16.389,     4.6573, -626.02},
+    {6,  0.1074, -11.269,     4.857,  -379.02},
+    {9,  0.1309,   2.2296,    6.5901,  177.16},
+};
 
 void setup(){
-  pinMode(s0, OUTPUT);
-  pinMode(s1, OUTPUT);
-  pinMode(s2, OUTPUT);
-  pinMode(s3, OUTPUT);
+    pinMode(s0, OUTPUT);
+    pinMode(s1, OUTPUT);
+    pinMode(s2, OUTPUT);
+    pinMode(s3, OUTPUT);
 
-  digitalWrite(s0, LOW);
-  digitalWrite(s1, LOW);
-  digitalWrite(s2, LOW);
-  digitalWrite(s3, LOW);
+    digitalWrite(s0, LOW);
+    digitalWrite(s1, LOW);
+    digitalWrite(s2, LOW);
+    digitalWrite(s3, LOW);
 
-  Serial.begin(9600);
+    // sensor(int CHANNEL, float M_LIN, float B_LIN, float M_LOG, float M_LIN)
+    // (int , float , float , float , float )
+    // ( CHANNEL,  M_LIN,  B_LIN,  M_LOG,  M_LIN)
+//    sensor s0(0, 1,1,1,1);
 
-  Serial.println("-------------------------------------------------------");
-  Serial.println("--------------------- BEGIN TEST ----------------------");
-  Serial.println("-------------------------------------------------------");
+    Serial.begin(9600);
+
+    Serial.println("-------------------------------------------------------");
+    Serial.println("--------------------- BEGIN TEST ----------------------");
+    Serial.println("-------------------------------------------------------");
 }
 
 
 void loop(){
-    // total_1 = 0;
-    // total_2 = 0;
-    // total_3 = 0;
-    // total_4 = 0;
-    // total_5 = 0;
-    // total_6 = 0;
-    // total_7 = 0;
 
     // reset the totals
     for (int i = 0; i < max_channel; i++){
         total_raw[i] = 0;
-        total_oa[i] = 0;
+        total_g0[i] = 0;
     }
 
-
+    // for each reading, read every channel and add to respective total
     for (int j = 0; j < numReadings; j++){
         for(int i = 0; i < max_channel; i ++){
             // Serial.print("Value at channel ");
             // Serial.print(i);
             // Serial.print(" is : ");
             // Serial.println(readMux(i));
-            
+
             int *p;
             p = readMux(i);
-            
+
             total_raw[i] = total_raw[i] + *p;
-            total_oa[i] = total_oa[i] + *(p+1);
+            total_g0[i] = total_g0[i] + *(p+1);
         }
         delay(1);
     }
 
-
-
+    
     for (int i = 0; i < max_channel; i++) {
+        // get averages (smoothing) and print analog outputs
         average_raw[i] = total_raw[i] / numReadings;
-        average_oa[i] = total_oa[i] / numReadings;
-        Serial.print(average_raw[i]);
-        Serial.print(", ");
-        Serial.print(average_oa[i]);
+        average_g0[i] = total_g0[i] / numReadings;
+//        Serial.print(average_raw[i]);
+//        Serial.print(", ");
+//        Serial.print(average_g0[i]);
+//        Serial.print(", ");
+
+        // compute irradiance and print
+        if (average_g0[i] < 1000) {
+          irr[i] = sens_arr[i].irr_g0(average_g0[i]);
+//          Serial.print("g, ");
+        } else {
+          irr[i] = sens_arr[i].irr_raw(average_raw[i]);
+//          Serial.print("r, ");
+        }
+        Serial.print(irr[i]);
         Serial.print(", ");
     }
     Serial.println("");
-
 }
+
 
 
 int * readMux(int channel){
