@@ -11,11 +11,33 @@ R9  - log / lin adjustment **** NEEDS IMPROVEMENT
 R10 - op amp output along with raw output
 R11 - log / lin with op amp and autoselect channel (raw or amp) for irrad output
 R12 - low irrad cutoff variable added to sensor class
-    - high irrad cutoff warning 
+    - high irrad cutoff warning
+R13 - digital lowpass filter for smoothing (replace averaging implemented in R4)
+    - one channel with multiple tau values to test and print
+    T/tau = 16 looks good 
+R14 - all channels with one tau
 
 
 to add:
 - integrator to get total dosage
+- timer schedule so sensors are read at regular interval
+    - needed for consistent integration of dosage
+    - needed for consistent lowpass filtering (recall we have T and tau)
+- mux class?
+    - params
+        - sig pin
+        - gain pin
+        - control pins
+        - num channels
+        - interval for reading sensors continuously
+    - methods
+        - read all sensors once
+            - filter
+        - read all sensors continuously
+        - read one sensor once
+        - read all sensors once
+        - output to csv or thumb drive (serial input triggers for starting and stopping recording?)
+
 
 
 added:
@@ -38,15 +60,21 @@ class sensor
 {
     int id; // id number of sensor
 
-    // raw stuff
+    // m, b, and cutoff values (raw and gain) come from calibration data
+
+    // calibration data for raw stuff
     float m_r; // slope (m) and intercept (b) of y=mx+b regression
     float b_r;
     float anlg_cutoff_r; // analog values below this will print "X"
 
-    // amplified stuff (gain)
+    // calibration data for amplified stuff (gain)
     float m_g0; //gain0 - may expand to have multiple op amp channels
     float b_g0;
     float anlg_cutoff_g0;
+
+//    // lowpass filter coeffs
+//    float tau_r;
+//    float tau_g0;
 
     public:
     sensor(int ID, float M_R, float B_R, float ANLG_CUTOFF_R, float M_G0, float B_G0, float ANLG_CUTOFF_G0)
@@ -62,6 +90,9 @@ class sensor
         m_g0 = M_G0;
         b_g0 = B_G0;
         anlg_cutoff_g0 = ANLG_CUTOFF_G0;
+
+//        tau_r = 1;
+//        tau_g0 = 1;
     } // end public
 
 
@@ -79,13 +110,13 @@ class sensor
 
     float get_anlg_cutoff_r()
     {
-        float cut = 1.1*anlg_cutoff_r;
+        float cut = 1.1*anlg_cutoff_r; // 10% buffer added to cutoff
         return cut;
     }
 
     float get_anlg_cutoff_g0()
     {
-        float cut = 1.1*anlg_cutoff_g0;
+        float cut = 1.1*anlg_cutoff_g0; // 10% buffer added to cutoff
         return cut;
     }
 
@@ -102,30 +133,37 @@ const int SIG_pin = 6;
 const int GAIN_pin = 3;
 
 // number of channels
-const int max_channel = 8;
+const int max_channel = 1; //8
 
-// for raw readings
-float total_raw[max_channel];
-float average_raw[max_channel];
+// interval for reading sensors (units????)
+const float T = 1;
+const float tau = 1;
 
-// for op amp readings
-float total_g0[max_channel];
-float average_g0[max_channel];
+// for filtered raw readings
+float raw_f[max_channel];
+float raw_f1[max_channel];
+float raw_f2[max_channel];
+float raw_f3[max_channel];
+float raw_f4[max_channel];
+
+
+// for filtered op amp readings
+// g0 indicates ch0 of gain
+// there is expandability to multiple gain channelsf or higher res at even lower readings
+float g0_f[max_channel];
 
 float irr[max_channel];
-
-const int numReadings = 50;
 
 sensor sens_arr[max_channel]{
 //sensor(int ID, float M_R, float B_R, float CUTOFF_R, float M_G0, float B_G0, float CUTOFF_G0)
     {0,  0.1206,  -9.4596,  0.0,      5.5157, -326.190,   15},
-    {1,  0.0902,  -8.2601,  0.1,      4.2468, -282.230,  110},
-    {2,  0.2096,   0.5314,  0.0,     11.3250,   27.652,   95},
-    {3,  0.1952,  -7.2172,  0.0,     10.0040, -306.580,   66},
-    {4,  0.1035,   0.2135,  0.8,      5.4794,   63.844,  135},
-    {5,  0.1024, -16.3890,  4.0,      4.6573, -626.020,  296},
-    {6,  0.1074, -11.2690,  1.8,      4.8570, -379.020,  180},
-    {9,  0.1309,   2.2296,  0.7,      6.5901,  177.160,  131},
+//    {1,  0.0902,  -8.2601,  0.1,      4.2468, -282.230,  110},
+//    {2,  0.2096,   0.5314,  0.0,     11.3250,   27.652,   95},
+//    {3,  0.1952,  -7.2172,  0.0,     10.0040, -306.580,   66},
+//    {4,  0.1035,   0.2135,  0.8,      5.4794,   63.844,  135},
+//    {5,  0.1024, -16.3890,  4.0,      4.6573, -626.020,  296},
+//    {6,  0.1074, -11.2690,  1.8,      4.8570, -379.020,  180},
+//    {9,  0.1309,   2.2296,  0.7,      6.5901,  177.160,  131},
 };
 
 void setup(){
@@ -149,68 +187,66 @@ void setup(){
     Serial.println("-------------------------------------------------------");
     Serial.println("--------------------- BEGIN TEST ----------------------");
     Serial.println("-------------------------------------------------------");
+    Serial.println("2,4,8,16,32");
 }
 
 
 void loop(){
 
-    // reset the totals
-    for (int i = 0; i < max_channel; i++){
-        total_raw[i] = 0;
-        total_g0[i] = 0;
-    }
+    // for each channel...
+    for(int i = 0; i < max_channel; i ++){
+        // Serial.print("Value at channel ");
+        // Serial.print(i);
+        // Serial.print(" is : ");
+        // Serial.println(readMux(i));
 
-    // for each reading, read every channel and add to respective total
-    for (int j = 0; j < numReadings; j++){
-        for(int i = 0; i < max_channel; i ++){
-            // Serial.print("Value at channel ");
-            // Serial.print(i);
-            // Serial.print(" is : ");
-            // Serial.println(readMux(i));
+        int *p; // make a pointer to store readings
+        p = readMux(i); // *p returns raw reading, *(p+1) returns gain0
 
-            int *p;
-            p = readMux(i);
+        // this implements lowpass filter 1/(tau*s+1)
+        raw_f[i] = raw_f[i] + T/2*(-raw_f[i] + *p);
+        raw_f1[i] = raw_f1[i] + T/4*(-raw_f1[i] + *p);
+        raw_f2[i] = raw_f2[i] + T/8*(-raw_f2[i] + *p);
+        raw_f3[i] = raw_f3[i] + T/16*(-raw_f3[i] + *p);
+        raw_f4[i] = raw_f4[i] + T/32*(-raw_f4[i] + *p);
 
-            total_raw[i] = total_raw[i] + *p;
-            total_g0[i] = total_g0[i] + *(p+1);
-        }
-        delay(1);
-    }
+        g0_f[i] = g0_f[i] + T/tau*(-g0_f[i] + *(p+1));
 
-
-    for (int i = 0; i < max_channel; i++) {
-        // get averages (smoothing) and print analog outputs
-        average_raw[i] = total_raw[i] / numReadings;
-        average_g0[i] = total_g0[i] / numReadings;
-//        Serial.print(average_raw[i]);
-//        Serial.print(", ");
-//        Serial.print(average_g0[i]);
-//        Serial.print(", ");
-
-        // compute irradiance and print
-        if (average_g0[i] < 1.1*sens_arr[i].get_anlg_cutoff_g0()) {
-            // if the amp signal is too low, output 0 irradiance and warning
-            irr[i] = 0;
-            Serial.print("amp cut, ");
-        } else if (average_g0[i] < 1000) {
-            // if amp signal is <1000 (not too close to 1024 saturation), use it
-            irr[i] = sens_arr[i].irr_g0(average_g0[i]);
-            Serial.print("amp, ");
-        } else if (average_raw[i] < 5) {
-            // if raw signal is too low, output 0 irrad and warning
-            irr[i] = 0;
-            Serial.print("raw cut, ");
-        } else if (average_raw[i] > 1000) {
-            // if raw signal is >1000 (close to saturated)
-            irr[i] = 0;
-            Serial.print("TOO HIGH, ");
-        } else {
-            // if amp signal close to saturation, use raw signal
-            irr[i] = sens_arr[i].irr_raw(average_raw[i]);
-            Serial.print("raw, ");
-        }
-        Serial.print(irr[i]);
+        // now compute irradiance and print
+//        if (g0_f[i] < 1.1*sens_arr[i].get_anlg_cutoff_g0()) {
+//            // if the amp signal is too low, output 0 irradiance and warning
+//            irr[i] = 0;
+//            Serial.print("amp cut, ");
+//        } else if (g0_f[i] < 1000) {
+//            // if amp signal is <1000 (not too close to 1024 saturation), use it
+//            irr[i] = sens_arr[i].irr_g0(g0_f[i]);
+//            Serial.print("amp, ");
+//        } else if (raw_f[i] < 5) {
+//            // if raw signal is too low, output 0 irrad and warning
+//            irr[i] = 0;
+//            Serial.print("raw cut, ");
+//        } else if (raw_f[i] > 1000) {
+//            // if raw signal is >1000 (close to saturated)
+//            irr[i] = 0;
+//            Serial.print("TOO HIGH, ");
+//        } else {
+//            // if amp signal close to saturation, use raw signal
+//            irr[i] = sens_arr[i].irr_raw(raw_f[i]);
+//            Serial.print("raw, ");
+//        }
+        Serial.print(*p);
         Serial.print(", ");
+        Serial.print(raw_f[i]);
+        Serial.print(", ");
+        Serial.print(raw_f1[i]);
+        Serial.print(", ");
+        Serial.print(raw_f2[i]);
+        Serial.print(", ");
+        Serial.print(raw_f3[i]);
+        Serial.print(", ");
+        Serial.print(raw_f4[i]);
+        Serial.print(", ");
+
     }
     Serial.println("");
 }
