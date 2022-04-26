@@ -157,15 +157,20 @@ float g0_f[max_channel];
 float irr[max_channel];
 
 sensor sens_arr[max_channel]{
-//sensor(int ID, float M_R, float B_R, float CUTOFF_R, float M_G0, float B_G0, float CUTOFF_G0)
-	{0,  0.1206,  -9.4596,  0.0,      5.5157, -326.190,   15},
-   {1,  0.0902,  -8.2601,  0.1,      4.2468, -282.230,  110},
-   {2,  0.2096,   0.5314,  0.0,     11.3250,   27.652,   95},
-   {3,  0.1952,  -7.2172,  0.0,     10.0040, -306.580,   66},
-   {4,  0.1035,   0.2135,  0.8,      5.4794,   63.844,  135},
-   {5,  0.1024, -16.3890,  4.0,      4.6573, -626.020,  296},
-   {6,  0.1074, -11.2690,  1.8,      4.8570, -379.020,  180},
-   {9,  0.1309,   2.2296,  0.7,      6.5901,  177.160,  131},
+    // DATA FROM 2022 APR 25
+    //sensor(int ID, float M_R, float B_R, float CUTOFF_R, float M_G0, float B_G0, float CUTOFF_G0)
+    //
+    //             RAW                          GAIN
+    // id   slope, intcpt, cutoff       slope, intcpt, low cutoff
+    // ------------------------------------------------------
+    {0, 0.0492, -9.5134, 5,     2.5322, -412.43,  80},
+    {1, 0.0800, -8.2195, 5,     4.1207, -370.50, 157},
+    {2, 0.1133, +1.0343, 5,     6.3067, +33.803, 400},
+    {3, 0.0973, -5.4148, 5,     4.9533, -240.55, 125},
+    {4, 0.0599, +1.4029, 5,     3.0105, +134.53, 368},
+    {5, 0.0632, -13.559, 5,     3.5144, -726.62, 313},
+    {6, 0.0706, -10.680, 5,     3.8513, -539.97, 207},
+    {7, 0.0619, +2.0349, 5,     3.1128, +166.87, 350},
 };
 
 void setup(){
@@ -186,9 +191,18 @@ void setup(){
 
 	Serial.begin(9600);
 
+    Serial.println("PROGRAM: GUVA_READ_R15");
+    Serial.println("EDIT: 2022 APR 25");
+
 	Serial.println("-------------------------------------------------------");
 	Serial.println("--------------------- BEGIN TEST ----------------------");
 	Serial.println("-------------------------------------------------------");
+
+    Serial.println("\nUNITS IN uW/cm^2\n");
+
+    Serial.println("ch0,, ch1,, ch2,, ch3,, ch4,, ch5,, ch6,, ch7");
+    Serial.print("ch0_msg, ch0_irr, ch1_msg, ch1_irr, ch2_msg, ch2_irr, ch3_msg, ch3_irr, ");
+    Serial.println("ch4_msg, ch4_irr, ch5_msg, ch5_irr, ch6_msg, ch6_irr, ch7_msg, ch7_irr");
 }
 
 
@@ -213,7 +227,7 @@ void loop(){
 		if (g0_f[i] < 1.1*sens_arr[i].get_anlg_cutoff_g0()) {
 			// if the amp signal is too low, output 0 irradiance and warning
 			irr[i] = 0;
-			Serial.print("amp cut, ");
+			Serial.print("amp cut (low irrad), ");
 		} else if (g0_f[i] < 1000) {
 			// if amp signal is <1000 (not too close to 1024 saturation), use it
 			irr[i] = sens_arr[i].irr_g0(g0_f[i]);
@@ -221,11 +235,11 @@ void loop(){
 		} else if (raw_f[i] < 5) {
 			// if raw signal is too low, output 0 irrad and warning
 			irr[i] = 0;
-			Serial.print("raw cut, ");
+			Serial.print("raw cut (mid irrad), ");
 		} else if (raw_f[i] > 1000) {
 			// if raw signal is >1000 (close to saturated)
-			irr[i] = 0;
-			Serial.print("TOO HIGH, ");
+			irr[i] = 999999;
+			Serial.print("!!WARNING!! IRRADIANCE TOO HIGH, SENSORS MAY INCUR DAMAGE, ");
 		} else {
 			// if amp signal close to saturation, use raw signal
 			irr[i] = sens_arr[i].irr_raw(raw_f[i]);
